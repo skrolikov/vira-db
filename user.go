@@ -13,13 +13,18 @@ type User struct {
 }
 
 // CreateUser — создает пользователя
-func CreateUser(db *sql.DB, username, passwordHash string) error {
-	// Здесь пример вставки в базу
-	_, err := db.Exec("INSERT INTO users (username, password_hash) VALUES ($1, $2)", username, passwordHash)
+func CreateUser(db *sql.DB, username, passwordHash string) (string, error) {
+	var userID string
+	err := db.QueryRow(`
+		INSERT INTO users (username, password_hash) 
+		VALUES ($1, $2) 
+		RETURNING id
+	`, username, passwordHash).Scan(&userID)
+
 	if err != nil {
-		return err
+		return "", err
 	}
-	return nil
+	return userID, nil
 }
 
 // GetUserByUsername — возвращает пользователя по имени
