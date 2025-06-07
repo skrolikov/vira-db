@@ -7,16 +7,15 @@ import (
 	_ "github.com/lib/pq"
 )
 
-func Connect(dbURL string) *sql.DB {
+// Connect открывает соединение с базой
+func Connect(dbURL string) (*sql.DB, error) {
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
-		log.Fatal("Ошибка подключения к БД:", err)
+		return nil, err
 	}
-
 	if err := db.Ping(); err != nil {
-		log.Fatal("БД не отвечает:", err)
+		return nil, err
 	}
-
 	log.Println("Подключено к БД!")
-	return db
+	return db, nil
 }
