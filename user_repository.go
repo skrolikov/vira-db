@@ -9,6 +9,19 @@ type userRepo struct {
 	db *sql.DB
 }
 
+func (r *userRepo) GetUserByID(id string) (*User, error) {
+	query := "SELECT id, username, password_hash FROM users WHERE id = $1"
+	user := &User{}
+	err := r.db.QueryRow(query, id).Scan(&user.ID, &user.Username, &user.PasswordHash)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil // пользователь не найден
+		}
+		return nil, err // другая ошибка
+	}
+	return user, nil
+}
+
 func NewUserRepository(db *sql.DB) UserRepository {
 	return &userRepo{db: db}
 }
