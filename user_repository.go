@@ -5,6 +5,17 @@ import (
 	"errors"
 )
 
+// User — структура пользователя
+type User struct {
+	ID           string
+	Username     string
+	PasswordHash string
+	Email        string
+	Role         string
+	Confirmed    bool
+	ConfirmToken string
+}
+
 type userRepo struct {
 	db *sql.DB
 }
@@ -26,14 +37,16 @@ func NewUserRepository(db *sql.DB) UserRepository {
 	return &userRepo{db: db}
 }
 
-func (r *userRepo) CreateUser(username, passwordHash string) (string, error) {
+func (r *userRepo) CreateUserExtended(username, passwordHash, email, role string, confirmed bool, confirmToken string) (string, error) {
 	var userID string
 	err := r.db.QueryRow(`
-		INSERT INTO users (username, password) 
-		VALUES ($1, $2) 
+		INSERT INTO users (username, password, email, role, confirmed, confirm_token)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING id
-	`, username, passwordHash).Scan(&userID)
+	`, username, passwordHash, email, role, confirmed, confirmToken).Scan(&userID)
+
 	if err != nil {
+		// Можно тут обработать уникальность username/email, если настроены уникальные индексы
 		return "", err
 	}
 	return userID, nil
@@ -41,8 +54,12 @@ func (r *userRepo) CreateUser(username, passwordHash string) (string, error) {
 
 func (r *userRepo) GetUserByUsername(username string) (*User, error) {
 	user := &User{}
-	err := r.db.QueryRow("SELECT id, username, password FROM users WHERE username=$1", username).
-		Scan(&user.ID, &user.Username, &user.PasswordHash)
+	err := r.db.QueryRow(`
+	SELECT id, username, password, email, role, confirmed, confirm_token
+	FROM users
+	WHERE username = $1
+`).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Email, &user.Role, &user.Confirmed, &user.ConfirmToken)
+
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
