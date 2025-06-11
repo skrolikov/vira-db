@@ -55,10 +55,10 @@ func (r *userRepo) CreateUserExtended(username, passwordHash, email, role string
 func (r *userRepo) GetUserByUsername(username string) (*User, error) {
 	user := &User{}
 	err := r.db.QueryRow(`
-	SELECT id, username, password, email, role, confirmed, confirm_token
-	FROM users
-	WHERE username = $1
-`).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Email, &user.Role, &user.Confirmed, &user.ConfirmToken)
+		SELECT id, username, password, email, role, confirmed, confirm_token
+		FROM users
+		WHERE username = $1
+	`, username).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Email, &user.Role, &user.Confirmed, &user.ConfirmToken)
 
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
