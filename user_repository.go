@@ -37,6 +37,26 @@ func NewUserRepository(db *sql.DB) UserRepository {
 	return &userRepo{db: db}
 }
 
+func (r *userRepo) ExistsByUsername(username string) (bool, error) {
+	var exists bool
+	query := "SELECT EXISTS(SELECT 1 FROM users WHERE username = $1)"
+	err := r.db.QueryRow(query, username).Scan(&exists)
+	if err != nil {
+		return false, err
+	}
+	return exists, nil
+}
+
+func (r *userRepo) ExistsByEmail(email string) (bool, error) {
+	var exists bool
+	query := "SELECT EXISTS(SELECT 1 FROM users WHERE email = $1)"
+	err := r.db.QueryRow(query, email).Scan(&exists)
+	if err != nil {
+		return false, err
+	}
+	return exists, nil
+}
+
 func (r *userRepo) CreateUserExtended(username, passwordHash, email, role string, confirmed bool, confirmToken string) (string, error) {
 	var userID string
 	err := r.db.QueryRow(`
