@@ -4,19 +4,25 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"log"
 	"sync"
 	"time"
 
 	_ "github.com/lib/pq"
 	config "github.com/skrolikov/vira-config"
+	logger "github.com/skrolikov/vira-logger"
 )
 
 var (
 	instance *sql.DB
 	once     sync.Once
 	mu       sync.RWMutex
+	logg     *logger.Logger // Кастомный логгер
 )
+
+// SetLogger задаёт логгер для пакета db
+func SetLogger(l *logger.Logger) {
+	logg = l
+}
 
 // DBStats представляет статистику подключения к БД
 type DBStats struct {
@@ -40,29 +46,38 @@ func Init(ctx context.Context, cfg *config.Config) (*sql.DB, error) {
 
 		conn, err := sql.Open("postgres", cfg.DBUrl)
 		if err != nil {
-			initErr = fmt.Errorf("failed to open DB connection: %w", err)
+			initErr = fmt.Errorf("не удалось открыть соединение с БД: %w", err)
+			if logg != nil {
+				logg.Error("не удалось открыть соединение с БД: %v", err)
+			}
 			return
 		}
 
-		// Настройки пула соединений
-		conn.SetMaxOpenConns(cfg.DBMaxOpenConns)       // Максимум открытых соединений
-		conn.SetMaxIdleConns(cfg.DBMaxIdleConns)       // Максимум бездействующих соединений
-		conn.SetConnMaxLifetime(cfg.DBConnMaxLifetime) // Максимальное время жизни соединения
-		conn.SetConnMaxIdleTime(cfg.DBConnMaxIdleTime) // Максимальное время бездействия
+		conn.SetMaxOpenConns(cfg.DBMaxOpenConns)
+		conn.SetMaxIdleConns(cfg.DBMaxIdleConns)
+		conn.SetConnMaxLifetime(cfg.DBConnMaxLifetime)
+		conn.SetConnMaxIdleTime(cfg.DBConnMaxIdleTime)
 
-		// Проверка соединения с таймаутом
 		pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
 
 		if err = conn.PingContext(pingCtx); err != nil {
 			_ = conn.Close()
-			initErr = fmt.Errorf("failed to ping DB: %w", err)
+			initErr = fmt.Errorf("не удалось пропинговать БД: %w", err)
+			if logg != nil {
+				logg.Error("не удалось пропинговать БД: %v", err)
+			}
 			return
 		}
 
 		instance = conn
-		log.Println("✅ Database connection established successfully")
 
+		if logg != nil {
+			logg.Info("✅ Соединение с базой данных установлено успешно")
+		}
+
+		// Запуск мониторинга в отдельной горутине
+		go monitorConnection(ctx, 30*time.Second)
 	})
 
 	return instance, initErr
@@ -89,11 +104,18 @@ func Close() error {
 	}
 
 	if err := instance.Close(); err != nil {
-		return fmt.Errorf("failed to close DB connection: %w", err)
+		if logg != nil {
+			logg.Error("не удалось закрыть соединение с БД: %v", err)
+		}
+		return fmt.Errorf("не удалось закрыть соединение с БД: %w", err)
 	}
 
 	instance = nil
-	log.Println("🔌 Database connection closed")
+
+	if logg != nil {
+		logg.Info("🔌 Соединение с базой данных закрыто")
+	}
+
 	return nil
 }
 
@@ -133,7 +155,7 @@ func HealthCheck(ctx context.Context) error {
 	return nil
 }
 
-// monitorConnection периодически проверяет соединение с БД
+// monitorConnection периодически проверяет соединение с БД и логгирует ошибки
 func monitorConnection(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -141,11 +163,20 @@ func monitorConnection(ctx context.Context, interval time.Duration) {
 	for {
 		select {
 		case <-ctx.Done():
+			if logg != nil {
+				logg.Info("🔕 Мониторинг соединения с БД остановлен")
+			}
 			return
 		case <-ticker.C:
 			if err := HealthCheck(ctx); err != nil {
-				log.Printf("⚠️ Database health check failed: %v", err)
-				// Здесь можно добавить логику восстановления соединения
+				if logg != nil {
+					logg.Warn("⚠️ Ошибка проверки здоровья БД: %v", err)
+				}
+				// Здесь можно добавить логику восстановления соединения или алерты
+			} else {
+				if logg != nil {
+					logg.Debug("✔️ Проверка здоровья БД успешна")
+				}
 			}
 		}
 	}
@@ -160,25 +191,26 @@ func WithTransaction(ctx context.Context, fn func(*sql.Tx) error) error {
 
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
+		return fmt.Errorf("не удалось начать транзакцию: %w", err)
 	}
 
 	defer func() {
 		if p := recover(); p != nil {
 			_ = tx.Rollback()
-			panic(p) // re-throw panic after rollback
+			panic(p) // повторно вызываем панику после отката
 		}
 	}()
 
 	if err := fn(tx); err != nil {
 		if rbErr := tx.Rollback(); rbErr != nil {
-			return fmt.Errorf("transaction error: %v, rollback error: %w", err, rbErr)
+			err = fmt.Errorf("ошибка транзакции: %v, ошибка отката: %w", err, rbErr)
+			return err
 		}
 		return err
 	}
 
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit transaction: %w", err)
+		return fmt.Errorf("не удалось зафиксировать транзакцию: %w", err)
 	}
 
 	return nil
